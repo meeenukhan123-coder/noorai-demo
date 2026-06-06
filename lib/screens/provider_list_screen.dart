@@ -1,0 +1,405 @@
+import 'package:flutter/material.dart';
+import '../theme.dart';
+import '../models/therapist.dart';
+import '../services/api_service.dart';
+import '../widgets/score_bar.dart';
+import 'provider_detail_screen.dart';
+import 'agent_trace_screen.dart';
+
+class ProviderListScreen extends StatefulWidget {
+  final String userQuery;
+
+  const ProviderListScreen({super.key, required this.userQuery});
+
+  @override
+  State<ProviderListScreen> createState() => _ProviderListScreenState();
+}
+
+class _ProviderListScreenState extends State<ProviderListScreen> {
+  final ApiService _api = ApiService();
+  bool _isLoading = true;
+  String? _error;
+  List<Therapist> _therapists = [];
+  String _traceId = '';
+  Map<String, dynamic> _intent = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final result = await _api.findTherapists(widget.userQuery);
+      if (!mounted) return;
+      setState(() {
+        _therapists = result.therapists;
+        _traceId = result.traceId;
+        _intent = result.intent;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _isLoading = false;
+      });
+    }
+  }
+
+  // Build readable intent chips from extracted intent map
+  List<String> get _intentChips {
+    final chips = <String>[];
+    final service = _intent['service_type'] as String?;
+    if (service != null) {
+      chips.add(service.replaceAll('_', ' ').split(' ').map((w) {
+        return w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}';
+      }).join(' '));
+    }
+    final city = _intent['city'] as String?;
+    final area = _intent['area'] as String?;
+    if (city != null || area != null) {
+      chips.add([area, city].where((s) => s != null).join(', '));
+    }
+    final age = _intent['child_age'];
+    if (age != null) chips.add('Age $age');
+    final budget = _intent['budget_per_session'];
+    if (budget != null) chips.add('Budget Rs $budget');
+    return chips;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4FBF6),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Color(0xFF01411C)),
+        title: const Text(
+          'Top Matches',
+          style: TextStyle(
+              color: Color(0xFF01411C),
+              fontWeight: FontWeight.bold,
+              fontSize: 18),
+        ),
+      ),
+      body: Column(
+        children: [
+          // Intent chips bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            color: Colors.white,
+            width: double.infinity,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: _intentChips
+                  .map((chip) => _buildIntentChip(chip))
+                  .toList(),
+            ),
+          ),
+          // Results
+          Expanded(
+            child: _isLoading
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: Color(0xFF0E7C42)),
+                        SizedBox(height: 16),
+                        Text('7 agents working...',
+                            style: TextStyle(color: Color(0xFF0E7C42))),
+                      ],
+                    ),
+                  )
+                : _error != null
+                    ? _buildError()
+                    : _therapists.isEmpty
+                        ? const Center(
+                            child: Text('No therapists found for your query.'))
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _therapists.length,
+                            itemBuilder: (ctx, i) =>
+                                _buildCard(_therapists[i], ctx, i),
+                          ),
+          ),
+          // See Agent Reasoning button — only when we have real results
+          if (!_isLoading && _error == null && _therapists.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.white,
+              child: SafeArea(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AgentTraceScreen(traceId: _traceId),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.analytics_outlined,
+                      color: Color(0xFF0E7C42)),
+                  label: const Text('See Agent Reasoning →',
+                      style: TextStyle(color: Color(0xFF0E7C42))),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                    side: const BorderSide(color: Color(0xFF0E7C42)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.cloud_off_rounded,
+                size: 48, color: NoorColors.textMuted),
+            const SizedBox(height: 16),
+            const Text(
+              "Couldn't reach NoorAI",
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: NoorColors.primaryDeepest),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error ?? 'Something went wrong.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: NoorColors.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh, color: NoorColors.primary),
+              label: const Text('Try again',
+                  style: TextStyle(color: NoorColors.primary)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: NoorColors.primary),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntentChip(String text) {
+    return Chip(
+      label: Text(text,
+          style: const TextStyle(fontSize: 12, color: Colors.white)),
+      backgroundColor: const Color(0xFF064E2B),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      side: BorderSide.none,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+    );
+  }
+
+  Widget _buildCard(Therapist t, BuildContext context, int rank) {
+    final isTop = rank == 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: isTop
+            ? Border.all(color: NoorColors.primary, width: 1.6)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: isTop
+                ? NoorColors.primary.withValues(alpha: 0.14)
+                : Colors.black.withValues(alpha: 0.04),
+            blurRadius: isTop ? 18 : 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (isTop)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              decoration: const BoxDecoration(
+                color: NoorColors.brand,
+                borderRadius:
+                    BorderRadius.vertical(top: Radius.circular(15)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.auto_awesome, color: Colors.white, size: 15),
+                  SizedBox(width: 6),
+                  Text('BEST MATCH · AI RANKED #1',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6)),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: const Color(0xFFE4F5EC),
+                  child: Icon(
+                    t.gender == 'female' ? Icons.woman : Icons.man,
+                    color: const Color(0xFF0E7C42),
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              t.name,
+                              style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1F2937)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (t.verified)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(Icons.verified,
+                                  color: NoorColors.primary, size: 17),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${t.rating} ★ (${t.reviewCount} reviews) · ${t.area}',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            // Overall score bar
+            if (t.overallScore != null) ...[
+              ScoreBar(
+                label: 'Overall Match Score',
+                score: t.overallScore!,
+              ),
+            ],
+            const SizedBox(height: 8),
+            // Highlights
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (t.distanceKm != null)
+                  _chip(Icons.location_on_outlined,
+                      '${t.distanceKm!.toStringAsFixed(1)} km'),
+                _chip(Icons.payments_outlined,
+                    'Rs ${t.finalPrice?.toInt() ?? t.basePrice.toInt()}/session'),
+                if (t.qualificationLevel != null)
+                  _chip(Icons.school_outlined,
+                      t.qualificationLevel!.toUpperCase()),
+              ],
+            ),
+            // Reasoning
+            if (t.reasoning != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                t.reasoning!,
+                style: TextStyle(
+                    fontSize: 12, color: Colors.grey.shade600, height: 1.4),
+              ),
+            ],
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProviderDetailScreen(
+                        therapist: t,
+                        intent: _intent,
+                        traceId: _traceId,
+                      ),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0E7C42),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('View Details & Book'),
+              ),
+            ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4FBF6),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: const Color(0xFF6B7280)),
+          const SizedBox(width: 4),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 11, color: Color(0xFF4B5563))),
+        ],
+      ),
+    );
+  }
+}
